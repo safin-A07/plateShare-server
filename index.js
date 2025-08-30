@@ -99,9 +99,23 @@ async function run() {
     });
 
     // ✅ Get all users
-    app.get("/users", verifyFBToken, verifyAdmin, async (req, res) => {
+    app.get("/users", verifyFBToken, verifyAdmin, verifyCharity, async (req, res) => {
       const users = await usersCollection.find().toArray();
       res.json(users);
+    });
+
+    // Fetch logged-in charity profile
+    // Fetch all charity users (admin or logged-in users can access)
+    app.get("/users/charities", verifyFBToken, async (req, res) => {
+      try {
+        const charityUsers = await usersCollection
+          .find({ role: "charity" })
+          .toArray();
+        res.json(charityUsers);
+      } catch (err) {
+        console.error("Failed to fetch charities:", err);
+        res.status(500).json({ message: "Failed to fetch charities" });
+      }
     });
 
 
@@ -144,7 +158,7 @@ async function run() {
 
       res.json(user);
     });
-    
+
 
 
     // 1) Create PaymentIntent (fixed $25 => 2500 cents)
@@ -258,7 +272,45 @@ async function run() {
         console.error("Error fetching role requests:", err);
         res.status(500).json({ message: "Failed to fetch role requests" });
       }
+
     });
+
+    //  Get all requests of the logged-in charity
+    // Get all requests made by a specific charity
+    app.get("/role-requests/my-requests", verifyFBToken, verifyCharity, async (req, res) => {
+      try {
+        const email = req.decoded.email;
+        const requests = await db.collection("roleRequests")
+          .find({ email })
+          .sort({ createdAt: -1 })
+          .toArray();
+        res.json(requests);
+      } catch (err) {
+        console.error("Error fetching requests:", err);
+        res.status(500).json({ message: "Failed to fetch requests" });
+      }
+    });
+
+    // Delete a request (only if Pending)
+    app.delete("/role-requests/:id", verifyFBToken, async (req, res) => {
+      try {
+        const email = req.decoded.email;
+        const { id } = req.params;
+
+        const request = await db.collection("roleRequests").findOne({ _id: new ObjectId(id) });
+
+        if (!request) return res.status(404).json({ message: "Request not found" });
+        if (request.email !== email) return res.status(403).json({ message: "Forbidden" });
+        if (request.status !== "Pending") return res.status(400).json({ message: "Only pending requests can be deleted" });
+
+        const result = await db.collection("roleRequests").deleteOne({ _id: new ObjectId(id) });
+        res.json({ message: "Request deleted successfully", deletedCount: result.deletedCount });
+      } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: "Failed to delete request" });
+      }
+    });
+
 
     // Approve or Reject role request (admin only)
     app.patch("/role-requests/:id", verifyFBToken, verifyAdmin, async (req, res) => {  // ✅ NEW
