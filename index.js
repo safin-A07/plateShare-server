@@ -29,6 +29,7 @@ async function run() {
 
     const db = client.db("plateShare");
     usersCollection = db.collection("usersCollection");
+    donationsCollection = db.collection("donations");
 
     // ✅ Verify Firebase token middleware
     const verifyFBToken = async (req, res, next) => {
@@ -142,7 +143,7 @@ async function run() {
 
     // ✅ Allow any authenticated user to get their own profile
     app.get("/users/:email", verifyFBToken, async (req, res) => {
-      console.log("Decoded token:", req.headers);
+      // console.log("Decoded token:", req.headers);
       const email = req.params.email;
 
       // Make sure user can only fetch their own data
@@ -275,7 +276,6 @@ async function run() {
 
     });
 
-    //  Get all requests of the logged-in charity
     // Get all requests made by a specific charity
     app.get("/role-requests/my-requests", verifyFBToken, verifyCharity, async (req, res) => {
       try {
@@ -346,6 +346,51 @@ async function run() {
       }
     });
 
+
+    // restaurant role requests
+    app.post("/donations", verifyFBToken, async (req, res) => {
+      try {
+        const {
+          title,
+          foodType,
+          quantity,
+          pickupTime,
+          restaurantName,
+          restaurantEmail,
+          location,
+          imageUrl, 
+        } = req.body;
+
+        // Basic validation
+        if (!title || !foodType || !quantity || !pickupTime || !restaurantName || !restaurantEmail || !location) {
+          return res.status(400).json({ message: "All required fields must be provided" });
+        }
+
+        const newDonation = {
+          title,
+          foodType,
+          quantity,
+          pickupTime,
+          restaurantName,
+          restaurantEmail,
+          location,
+          imageUrl: imageUrl || null,
+          status: "Pending", // default
+          createdAt: new Date(),
+        };
+
+        const result = await donationsCollection.insertOne(newDonation);
+
+        res.status(201).json({
+          message: "Donation added successfully",
+          donationId: result.insertedId,
+          donation: newDonation,
+        });
+      } catch (err) {
+        console.error("❌ Error adding donation:", err);
+        res.status(500).json({ message: "Failed to add donation" });
+      }
+    });
 
   } catch (err) {
     console.error("❌ MongoDB connection failed:", err);
