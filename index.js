@@ -21,6 +21,8 @@ const client = new MongoClient(uri, {
 });
 
 let usersCollection;
+let donationsCollection;
+let restaurantRequestsCollection;
 
 async function run() {
   try {
@@ -30,7 +32,7 @@ async function run() {
     const db = client.db("plateShare");
     usersCollection = db.collection("usersCollection");
     donationsCollection = db.collection("donations");
-
+    restaurantRequestsCollection = db.collection("restaurantRequests");
     // ✅ Verify Firebase token middleware
     const verifyFBToken = async (req, res, next) => {
       const authHeader = req.headers.authorization;
@@ -348,6 +350,126 @@ async function run() {
 
 
     // restaurant role requests
+
+
+
+    //  become a restaurant (user can request, admin approve/reject)
+    app.post("/restaurant-requests", verifyFBToken, async (req, res) => {
+      try {
+        const {
+          restaurantName,
+          about,
+          location,
+          openingTime,
+          closingTime,
+          foodType,
+          imageUrl,
+          email,
+          phone,
+        } = req.body;
+
+        if (!restaurantName || !about || !location || !openingTime || !closingTime || !foodType || !email || !phone) {
+          return res.status(400).json({ message: "All required fields must be provided" });
+        }
+
+        // Check if already has a pending/approved request
+        const exists = await restaurantRequestsCollection.findOne({
+          email,
+          status: { $in: ["Pending", "Approved"] },
+        });
+        if (exists) {
+          return res.status(400).json({ message: "You already have a pending or approved request" });
+        }
+
+        const newRequest = {
+          restaurantName,
+          about,
+          location,
+          openingTime,
+          closingTime,
+          foodType,
+          imageUrl: imageUrl || null,
+          email,
+          phone,
+          status: "Pending",
+          createdAt: new Date(),
+        };
+
+        const result = await restaurantRequestsCollection.insertOne(newRequest);
+        res.status(201).json({
+          message: "Restaurant request submitted successfully",
+          requestId: result.insertedId,
+        });
+      } catch (err) {
+        console.error("❌ Error creating restaurant request:", err);
+        res.status(500).json({ message: "Failed to submit request" });
+      }
+    });
+    //  Get all restaurant requests (Admin only)
+    app.get("/restaurant-requests", verifyFBToken, verifyAdmin, async (req, res) => {
+      try {
+        const requests = await restaurantRequestsCollection
+          .find()
+          .sort({ createdAt: -1 })
+          .toArray();
+
+        res.json(requests);
+      } catch (err) {
+        console.error("❌ Failed to fetch restaurant requests:", err);
+        res.status(500).json({ message: "Failed to fetch restaurant requests" });
+      }
+    });
+    // Approve restaurant request
+    app.patch("/restaurant-requests/:id", verifyFBToken, verifyAdmin, async (req, res) => {
+      try {
+        const { id } = req.params;
+
+        // Find the request
+        const request = await restaurantRequestsCollection.findOne({ _id: new ObjectId(id) });
+        if (!request) return res.status(404).json({ message: "Request not found" });
+
+        // Update request status
+        await restaurantRequestsCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { status: "Approved" } }
+        );
+
+        // Update user role in usersCollection
+        await usersCollection.updateOne(
+          { email: request.restaurantEmail },
+          { $set: { role: "restaurant" } }
+        );
+
+        res.json({ message: "Restaurant request approved and role updated" });
+      } catch (err) {
+        console.error("❌ Failed to approve request:", err);
+        res.status(500).json({ message: "Failed to approve request" });
+      }
+    });
+
+    // Reject restaurant request
+    app.delete("/restaurant-requests/:id", verifyFBToken, verifyAdmin, async (req, res) => {
+      try {
+        const { id } = req.params;
+
+        const result = await restaurantRequestsCollection.deleteOne({ _id: new ObjectId(id) });
+
+        if (!result.deletedCount) {
+          return res.status(404).json({ message: "Request not found" });
+        }
+
+        // NOTE: we do NOT update user role here → remains "user"
+
+        res.json({ message: "Restaurant request deleted successfully" });
+      } catch (err) {
+        console.error("❌ Failed to delete request:", err);
+        res.status(500).json({ message: "Failed to delete request" });
+      }
+    });
+
+
+
+    //  be a donor
     app.post("/donations", verifyFBToken, async (req, res) => {
       try {
         const {
@@ -358,7 +480,7 @@ async function run() {
           restaurantName,
           restaurantEmail,
           location,
-          imageUrl, 
+          imageUrl,
         } = req.body;
 
         // Basic validation
