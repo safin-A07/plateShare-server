@@ -364,17 +364,18 @@ async function run() {
           closingTime,
           foodType,
           imageUrl,
-          email,
+          ownerEmail,
+          restaurantEmail,
           phone,
         } = req.body;
 
-        if (!restaurantName || !about || !location || !openingTime || !closingTime || !foodType || !email || !phone) {
+        if (!restaurantName || !about || !location || !openingTime || !closingTime || !foodType || !restaurantEmail || !phone || !ownerEmail) {
           return res.status(400).json({ message: "All required fields must be provided" });
         }
 
         // Check if already has a pending/approved request
         const exists = await restaurantRequestsCollection.findOne({
-          email,
+          ownerEmail,
           status: { $in: ["Pending", "Approved"] },
         });
         if (exists) {
@@ -389,7 +390,8 @@ async function run() {
           closingTime,
           foodType,
           imageUrl: imageUrl || null,
-          email,
+          ownerEmail,
+          restaurantEmail,
           phone,
           status: "Pending",
           createdAt: new Date(),
@@ -406,6 +408,8 @@ async function run() {
       }
     });
     //  Get all restaurant requests (Admin only)
+
+
     app.get("/restaurant-requests", verifyFBToken, verifyAdmin, async (req, res) => {
       try {
         const requests = await restaurantRequestsCollection
@@ -419,33 +423,37 @@ async function run() {
         res.status(500).json({ message: "Failed to fetch restaurant requests" });
       }
     });
+
+
     // Approve restaurant request
     app.patch("/restaurant-requests/:id", verifyFBToken, verifyAdmin, async (req, res) => {
       try {
         const { id } = req.params;
 
-        // Find the request
-        const request = await restaurantRequestsCollection.findOne({ _id: new ObjectId(id) });
-        if (!request) return res.status(404).json({ message: "Request not found" });
-
         // Update request status
-        await restaurantRequestsCollection.updateOne(
+        const result = await restaurantRequestsCollection.updateOne(
           { _id: new ObjectId(id) },
           { $set: { status: "Approved" } }
         );
 
-        // Update user role in usersCollection
-        await usersCollection.updateOne(
-          { email: request.restaurantEmail },
-          { $set: { role: "restaurant" } }
-        );
+        // Get the updated request
+        const request = await restaurantRequestsCollection.findOne({ _id: new ObjectId(id) });
 
-        res.json({ message: "Restaurant request approved and role updated" });
+        // Update user role in usersCollection if ownerEmail exists
+        if (request?.ownerEmail) {
+          await usersCollection.updateOne(
+            { email: request.ownerEmail },
+            { $set: { role: "restaurant" } }
+          );
+        }
+
+        res.json({ message: "Restaurant request approved and role updated", result });
       } catch (err) {
         console.error("❌ Failed to approve request:", err);
         res.status(500).json({ message: "Failed to approve request" });
       }
     });
+
 
     // Reject restaurant request
     app.delete("/restaurant-requests/:id", verifyFBToken, verifyAdmin, async (req, res) => {
