@@ -425,6 +425,18 @@ async function run() {
     });
 
 
+    // ✅ Get all donations (Admin only)
+    app.get("/donations", verifyFBToken, verifyAdmin, async (req, res) => {
+      try {
+        const donations = await donationsCollection.find().toArray();
+        res.json(donations);
+      } catch (err) {
+        console.error("❌ Error fetching donations:", err);
+        res.status(500).json({ message: "Failed to fetch donations" });
+      }
+    });
+
+
     // Approve restaurant request
     app.patch("/restaurant-requests/:id", verifyFBToken, verifyAdmin, async (req, res) => {
       try {
@@ -476,6 +488,27 @@ async function run() {
     });
 
 
+    //  Get restaurant by ownerEmail
+    app.get("/restaurant-requests/owner/:email", verifyFBToken, async (req, res) => {
+      try {
+        const email = req.params.email;
+        const restaurant = await restaurantRequestsCollection.findOne({ ownerEmail: email });
+
+        if (!restaurant) {
+          return res.status(404).json({ message: "Restaurant not found" });
+        }
+
+        res.json(restaurant);
+      } catch (err) {
+        console.error("❌ Error fetching restaurant by owner email:", err);
+        res.status(500).json({ message: "Failed to fetch restaurant" });
+      }
+    });
+
+    // ============================
+
+
+
 
     //  be a donor
     app.post("/donations", verifyFBToken, async (req, res) => {
@@ -521,6 +554,54 @@ async function run() {
         res.status(500).json({ message: "Failed to add donation" });
       }
     });
+    // get all my  donations (restaurant can see all donations)
+    app.get("/donations/restaurant/:email", verifyFBToken, async (req, res) => {
+      try {
+        const email = req.params.email;
+        const donations = await donationsCollection
+          .find({ restaurantEmail: email })
+          .toArray();
+
+        res.json(donations);
+      } catch (err) {
+        console.error("❌ Error fetching donations:", err);
+        res.status(500).json({ message: "Failed to fetch donations" });
+      }
+    });
+    //update donation information
+    app.put("/donations/:id", verifyFBToken, async (req, res) => {
+      try {
+        const id = req.params.id;
+        const updateData = req.body;
+
+        const result = await donationsCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: updateData }
+        );
+
+        res.json({ message: "Donation updated successfully", result });
+      } catch (err) {
+        console.error("❌ Error updating donation:", err);
+        res.status(500).json({ message: "Failed to update donation" });
+      }
+    });
+    // delete my donation
+    app.delete("/donations/:id", verifyFBToken, async (req, res) => {
+      try {
+        const id = req.params.id;
+
+        const result = await donationsCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
+
+        res.json({ message: "Donation deleted successfully", result });
+      } catch (err) {
+        console.error("❌ Error deleting donation:", err);
+        res.status(500).json({ message: "Failed to delete donation" });
+      }
+    });
+
+
 
   } catch (err) {
     console.error("❌ MongoDB connection failed:", err);
