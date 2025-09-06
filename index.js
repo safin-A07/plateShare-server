@@ -23,6 +23,8 @@ const client = new MongoClient(uri, {
 let usersCollection;
 let donationsCollection;
 let restaurantRequestsCollection;
+let reviewsCollection;
+let requestsCollection;
 
 async function run() {
   try {
@@ -33,6 +35,8 @@ async function run() {
     usersCollection = db.collection("usersCollection");
     donationsCollection = db.collection("donations");
     restaurantRequestsCollection = db.collection("restaurantRequests");
+    reviewsCollection = db.collection("reviews");
+    requestsCollection = db.collection("requests");
     // ✅ Verify Firebase token middleware
     const verifyFBToken = async (req, res, next) => {
       const authHeader = req.headers.authorization;
@@ -70,6 +74,16 @@ async function run() {
       const query = { email };
       const user = await usersCollection.findOne(query);
       if (!user || user.role !== 'charity') {
+        return res.status(403).send({ message: 'forbidden access' });
+      }
+      next();
+    };
+    // ✅ Verify restaurant middleware
+    const verifyRestaurant = async (req, res, next) => {
+      const email = req.decoded.email;
+      const query = { email };
+      const user = await usersCollection.findOne(query);
+      if (!user || user.role !== 'restaurant') {
         return res.status(403).send({ message: 'forbidden access' });
       }
       next();
@@ -425,8 +439,8 @@ async function run() {
     });
 
 
-    // ✅ Get all donations (Admin only)
-    app.get("/donations", verifyFBToken, verifyAdmin, async (req, res) => {
+    //  Get all donations for homepage (no verifyAdmin)
+    app.get("/donations", async (req, res) => {
       try {
         const donations = await donationsCollection.find().toArray();
         res.json(donations);
@@ -435,6 +449,20 @@ async function run() {
         res.status(500).json({ message: "Failed to fetch donations" });
       }
     });
+
+
+    //  Get all donations (Admin only)
+    app.get("/donations/admin", verifyFBToken, verifyAdmin, async (req, res) => {
+      try {
+        const donations = await donationsCollection.find().toArray();
+        res.json(donations);
+      } catch (err) {
+        console.error("❌ Error fetching donations:", err);
+        res.status(500).json({ message: "Failed to fetch donations" });
+      }
+    });
+
+
 
 
     // Approve restaurant request
@@ -600,6 +628,108 @@ async function run() {
         res.status(500).json({ message: "Failed to delete donation" });
       }
     });
+
+    //home page donations api
+
+
+    // Get a single donation with its reviews
+    app.get("/donations/:id", async (req, res) => {
+      try {
+        const id = req.params.id;
+
+        // Find the donation
+        const donation = await donationsCollection.findOne({
+          _id: new ObjectId(id),
+        });
+
+        if (!donation) {
+          return res.status(404).json({ message: "Donation not found" });
+        }
+
+        // Find reviews related to this donation
+        const reviews = await reviewsCollection
+          .find({ donationId: id })
+          .toArray();
+
+        res.json({
+          donation,
+          reviews,
+        });
+      } catch (err) {
+        console.error("❌ Error fetching donation details:", err);
+        res.status(500).json({ message: "Failed to fetch donation details" });
+      }
+    });
+
+    // Request for donation (charity)
+    app.post("/requests", verifyFBToken, verifyCharity, async (req, res) => {
+      try {
+        const requestData = req.body;
+
+        // add server-side timestamp to ensure consistency
+        requestData.createdAt = new Date();
+        requestData.status = "Pending";
+
+        const result = await requestsCollection.insertOne(requestData);
+
+        res.status(201).json({
+          message: "Donation request submitted successfully",
+          result,
+        });
+      } catch (err) {
+        console.error("❌ Error submitting request:", err);
+        res.status(500).json({ message: "Failed to submit request" });
+      }
+    });
+
+
+    // Get all requests made by logged-in charity
+    app.get("/requests", verifyFBToken, verifyCharity, async (req, res) => {
+      try {
+        const email = req.decoded.email; // logged-in charity’s email
+        const requests = await requestsCollection
+          .find({ charityEmail: email })
+          .sort({ createdAt: -1 })
+          .toArray();
+
+        res.json(requests);
+      } catch (err) {
+        console.error(" Error fetching requests:", err);
+        res.status(500).json({ message: "Failed to fetch requests" });
+      }
+    });
+
+    // Cancel a request (only if Pending & belongs to logged-in charity)
+    app.delete("/requests/:id", verifyFBToken, verifyCharity, async (req, res) => {
+      try {
+        const { id } = req.params;
+        const email = req.decoded.email;
+
+        const request = await requestsCollection.findOne({ _id: new ObjectId(id) });
+
+        if (!request) {
+          return res.status(404).json({ message: "Request not found" });
+        }
+
+        if (request.charityEmail !== email) {
+          return res.status(403).json({ message: "Forbidden: Not your request" });
+        }
+
+        if (request.status !== "Pending") {
+          return res.status(400).json({ message: "Only pending requests can be cancelled" });
+        }
+
+        const result = await requestsCollection.deleteOne({ _id: new ObjectId(id) });
+
+        res.json({ message: "Request cancelled successfully", deletedCount: result.deletedCount });
+      } catch (err) {
+        console.error("❌ Error cancelling request:", err);
+        res.status(500).json({ message: "Failed to cancel request" });
+      }
+    });
+
+
+
 
 
 
