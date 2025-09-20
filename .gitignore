@@ -1,2 +1,4 @@
 .env
 plateshare-firebase-admin.json
+
+.vercel

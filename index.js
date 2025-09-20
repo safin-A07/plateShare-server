@@ -8,7 +8,9 @@ const port = process.env.PORT || 3000;
 app.use(express.json());
 const cors = require("cors");
 app.use(cors());
-const serviceAccount = require("./plateshare-firebase-admin.json");
+
+const decodedKey = Buffer.from(process.env.FB_SERVICE_KEY, 'base64').toString('utf8');
+const serviceAccount = JSON.parse(decodedKey);
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
 });
@@ -28,7 +30,7 @@ let requestsCollection;
 
 async function run() {
   try {
-    await client.connect();
+    // await client.connect();
     console.log("✅ Connected to MongoDB");
 
     const db = client.db("plateShare");
@@ -274,7 +276,7 @@ async function run() {
     });
 
     // ============================
-    // ✅ ROLE REQUESTS MANAGEMENT
+    //  ROLE REQUESTS MANAGEMENT
     // ============================
 
     // Get all role requests (admin only)
@@ -661,6 +663,37 @@ async function run() {
       }
     });
 
+    // ✅ POST: Add a review
+    app.post("/reviews", async (req, res) => {
+      try {
+        const { donationId, reviewerName, description, rating } = req.body;
+
+        // validate input
+        if (!donationId || !reviewerName || !description || !rating) {
+          return res.status(400).json({ error: "All fields are required" });
+        }
+
+        const reviewDoc = {
+          donationId: new ObjectId(donationId),
+          reviewerName,
+          description,
+          rating: Number(rating),
+          createdAt: new Date(),
+        };
+
+       const result = await reviewsCollection.insertOne(reviewDoc);
+
+        res.status(201).json({
+          insertedId: result.insertedId,
+          ...reviewDoc,
+        });
+      } catch (err) {
+        console.error("❌ Error saving review:", err);
+        res.status(500).json({ error: "Failed to add review" });
+      }
+    });
+
+
     // Request for donation (charity)
     app.post("/requests", verifyFBToken, verifyCharity, async (req, res) => {
       try {
@@ -728,10 +761,77 @@ async function run() {
       }
     });
 
+    // Get all requests for a restaurant's donations
+    app.get("/restaurant/requests", verifyFBToken, verifyRestaurant, async (req, res) => {
+      try {
+        const email = req.decoded.email;
 
+        const requests = await requestsCollection
+          .find({ restaurantEmail: email })
+          .toArray();
 
+        res.json(requests);
+      } catch (err) {
+        console.error("❌ Error fetching restaurant requests:", err);
+        res.status(500).json({ message: "Failed to fetch restaurant requests" });
+      }
+    });
 
+    // Update request status (Accept / Reject)
+    app.patch("/requests/:id", verifyFBToken, verifyRestaurant, async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { status } = req.body; // "Accepted" or "Rejected"
 
+        const result = await requestsCollection.updateOne(
+          { _id: new ObjectId(id) },
+          { $set: { status } }
+        );
+
+        res.json({ message: "Request updated", result });
+      } catch (err) {
+        console.error("❌ Error updating request:", err);
+        res.status(500).json({ message: "Failed to update request" });
+      }
+    });
+
+    // PATCH: Confirm Pickup by Charity
+    // Confirm pickup (charity only)
+
+    // Confirm pickup (update both request + donation)
+    app.patch("/requests/:id/pickup", verifyFBToken, verifyCharity, async (req, res) => {
+      try {
+        const requestId = req.params.id;
+
+        // 1. find the request (to get donationId)
+        const request = await requestsCollection.findOne({ _id: new ObjectId(requestId) });
+        if (!request) {
+          return res.status(404).json({ message: "Request not found" });
+        }
+
+        // 2. update donation first
+        const donationId = request.donationId;
+        await donationsCollection.updateOne(
+          { _id: ObjectId.isValid(donationId) ? new ObjectId(donationId) : donationId },
+          { $set: { status: "Picked Up" } }
+        );
+
+        // 3. update request
+        const updatedRequest = await requestsCollection.findOneAndUpdate(
+          { _id: new ObjectId(requestId) },
+          { $set: { status: "Picked Up" } },
+          { returnDocument: "after" }
+        );
+
+        res.json({
+          message: "Pickup confirmed successfully",
+          request: updatedRequest.value,
+        });
+      } catch (err) {
+        console.error("❌ Error confirming pickup:", err);
+        res.status(500).json({ message: "Failed to confirm pickup" });
+      }
+    });
 
   } catch (err) {
     console.error("❌ MongoDB connection failed:", err);
