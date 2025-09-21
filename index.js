@@ -27,6 +27,7 @@ let donationsCollection;
 let restaurantRequestsCollection;
 let reviewsCollection;
 let requestsCollection;
+let favoritesCollection;
 
 async function run() {
   try {
@@ -39,6 +40,7 @@ async function run() {
     restaurantRequestsCollection = db.collection("restaurantRequests");
     reviewsCollection = db.collection("reviews");
     requestsCollection = db.collection("requests");
+    favoritesCollection = db.collection("favorites");
     // ✅ Verify Firebase token middleware
     const verifyFBToken = async (req, res, next) => {
       const authHeader = req.headers.authorization;
@@ -663,8 +665,8 @@ async function run() {
       }
     });
 
-    // ✅ POST: Add a review
-    app.post("/reviews", async (req, res) => {
+    //  POST: Add a review
+    app.post("/reviews", verifyFBToken, async (req, res) => {
       try {
         const { donationId, reviewerName, description, rating } = req.body;
 
@@ -681,7 +683,7 @@ async function run() {
           createdAt: new Date(),
         };
 
-       const result = await reviewsCollection.insertOne(reviewDoc);
+        const result = await reviewsCollection.insertOne(reviewDoc);
 
         res.status(201).json({
           insertedId: result.insertedId,
@@ -692,6 +694,90 @@ async function run() {
         res.status(500).json({ error: "Failed to add review" });
       }
     });
+
+
+    //  POST: Add to favorites
+    app.post("/favorites", verifyFBToken, async (req, res) => {
+      try {
+        const {
+          donationId,
+          title,
+          restaurantName,
+          location,
+          status,
+          quantity,
+          imageUrl,
+          ownerEmail,
+        } = req.body;
+
+        // minimal validation
+        if (!donationId) {
+          return res.status(400).json({ error: "donationId is required" });
+        }
+        if (!ownerEmail) {
+          return res.status(400).json({ error: "ownerEmail is required" });
+        }
+
+        // Avoid duplicate favorites for same user + donation
+        const exists = await favoritesCollection.findOne({
+          donationId: donationId,
+          ownerEmail: ownerEmail,
+        });
+
+        if (exists) {
+          return res.status(409).json({ error: "Donation already in favorites" });
+        }
+
+
+        const favoriteDoc = {
+          donationId: donationId,
+          title: title || null,
+          restaurantName: restaurantName || null,
+          location: location || null,
+          status: status || null,
+          quantity: quantity || null,
+          imageUrl: imageUrl || null,
+          ownerEmail: ownerEmail,
+          createdAt: new Date(),
+        };
+
+        const result = await favoritesCollection.insertOne(favoriteDoc);
+
+
+        res.status(201).json({ insertedId: result.insertedId, ...favoriteDoc });
+      } catch (err) {
+        console.error("❌ Error saving favorite:", err);
+        res.status(500).json({ error: "Failed to save favorite" });
+      }
+    });
+    // Get all favorites for a user
+    app.get("/favorites/:email", async (req, res) => {
+      try {
+        const { email } = req.params;
+        const favorites = await favoritesCollection.find({ ownerEmail: email }).toArray();
+        res.json(favorites);
+      } catch (err) {
+        console.error("❌ Error fetching favorites:", err);
+        res.status(500).json({ error: "Failed to fetch favorites" });
+      }
+    });
+ // Remove from favorites
+    app.delete("/favorites/:id", async (req, res) => {
+      try {
+        const { id } = req.params;
+        const result = await favoritesCollection.deleteOne({ _id: new ObjectId(id) });
+
+        if (result.deletedCount === 0) {
+          return res.status(404).json({ error: "Favorite not found" });
+        }
+        res.json({ message: "Favorite removed successfully" });
+      } catch (err) {
+        console.error("❌ Error removing favorite:", err);
+        res.status(500).json({ error: "Failed to remove favorite" });
+      }
+    });
+
+
 
 
     // Request for donation (charity)
