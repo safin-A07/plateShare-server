@@ -761,7 +761,7 @@ async function run() {
         res.status(500).json({ error: "Failed to fetch favorites" });
       }
     });
- // Remove from favorites
+    // Remove from favorites
     app.delete("/favorites/:id", async (req, res) => {
       try {
         const { id } = req.params;
@@ -814,6 +814,20 @@ async function run() {
         res.json(requests);
       } catch (err) {
         console.error(" Error fetching requests:", err);
+        res.status(500).json({ message: "Failed to fetch requests" });
+      }
+    });
+   // Public view of all charity requests, anyone logged in can see
+    app.get("/requests/public", verifyFBToken, async (req, res) => {
+      try {
+        const requests = await requestsCollection
+          .find({})
+          .sort({ createdAt: -1 })
+          .toArray();
+
+        res.json(requests);
+      } catch (err) {
+        console.error("❌ Error fetching public requests:", err);
         res.status(500).json({ message: "Failed to fetch requests" });
       }
     });
